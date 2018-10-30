@@ -2,7 +2,6 @@ package main
 
 
 import (
-    "fmt"
 	"io/ioutil"
     "os"
     "strconv"
@@ -192,6 +191,5 @@ func sinceNow(startTime time.Time) float64 {
         glog.Errorf("Failed to parse current timestamp in format '%s'", "2006-01-02 15:04:05")
         return 0.0
     }
-    fmt.Println(now.Sub(startTime).Hours())
     return now.Sub(startTime).Hours()
 }
