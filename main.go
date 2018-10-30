@@ -1,0 +1,197 @@
+package main
+
+
+import (
+    "fmt"
+	"io/ioutil"
+    "os"
+    "strconv"
+    "strings"
+    "time"
+
+    "github.com/golang/glog"
+    "k8s.io/api/batch/v1"
+    meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "k8s.io/apimachinery/pkg/runtime"
+    "k8s.io/apimachinery/pkg/watch"
+    "k8s.io/client-go/kubernetes"
+    lister_v1 "k8s.io/client-go/listers/batch/v1"
+    "k8s.io/client-go/tools/cache"
+    "k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/workqueue"
+)
+
+
+const (
+    defaultTimeLimit string     = "-1"
+    defaultNamespaceFile string = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+    defaultNamespaceName string = "default"
+)
+
+
+type JobCleanController struct {
+    client      kubernetes.Interface
+    jobLister   lister_v1.JobLister
+    informer    cache.Controller
+    queue       workqueue.RateLimitingInterface
+    namespace   string
+}
+
+func main() {
+
+    // load kubeconfig
+    kubeconfig := os.Getenv("KUBECONFIG")
+
+    config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+
+    if err != nil {
+        glog.Fatalf("Failed to load kubeconfig: %v", err)
+    }
+
+    // create k8s client
+    client, err := kubernetes.NewForConfig(config)
+
+    if err != nil {
+        glog.Fatalf("Failed to create kubernetes client: %v", err)
+    }
+
+    stopChan := make(chan struct{})
+    defer close(stopChan)
+
+    newJobCleanController(client).Run(stopChan)
+}
+
+func newJobCleanController(client kubernetes.Interface) *JobCleanController {
+    jc := &JobCleanController{
+        client: client,
+        queue: workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+        namespace: getNamespace(),
+    }
+
+    //TODO: resource version
+    indexer, informer := cache.NewIndexerInformer(
+        &cache.ListWatch{
+            ListFunc: func(lo meta_v1.ListOptions) (runtime.Object, error) {
+				return client.BatchV1().Jobs(jc.namespace).List(lo)
+			},
+			WatchFunc: func(lo meta_v1.ListOptions) (watch.Interface, error) {
+				return client.BatchV1().Jobs(jc.namespace).Watch(lo)
+			},
+        },
+        &v1.Job{},
+        10*time.Second,
+        cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				if key, err := cache.MetaNamespaceKeyFunc(obj); err == nil {
+					jc.queue.Add(key)
+				}
+			},
+		},
+		cache.Indexers{},
+    )
+
+    jc.informer = informer
+    jc.jobLister = lister_v1.NewJobLister(indexer)
+
+    return jc
+}
+
+func (jc *JobCleanController) Run(stopChan chan struct{}) {
+    defer jc.queue.ShutDown()
+
+    glog.Info("Start Job Clean Controller")
+    go jc.informer.Run(stopChan)
+
+    for {
+        jc.processNext()
+    }
+
+    <- stopChan
+    glog.Info("Shut down Job Clean Controller")
+}
+
+
+func (jc *JobCleanController) processNext() bool {
+    key, quit := jc.queue.Get()
+    if quit {
+        return false
+    }
+    defer jc.queue.Done(key)
+
+    jobName := strings.Split(key.(string), "/")[1]
+    err := jc.process(jobName)
+
+    if err != nil {
+        glog.Warningf("Skipped job: %s", jobName)
+    }
+    return true
+}
+
+func (jc *JobCleanController) process(key string) error {
+    // determine the job duration between now and start time
+    // if the job duration > time limit and has no active pods then delete the job
+
+    timelimitStr := os.Getenv("JOB_TIME_LIMIT_IN_HOURS")
+    if len(timelimitStr) == 0 {
+        timelimitStr = defaultTimeLimit
+    }
+    timelimit, err := strconv.ParseFloat(timelimitStr, 64)
+    if err != nil {
+        glog.Errorf("Failed to convert time limit: '%s' to integer", timelimitStr)
+        return err
+    }
+
+    job, err := jc.jobLister.Jobs(jc.namespace).Get(key)
+    if err != nil {
+        glog.Errorf("Failed to retrieve job: %s, %v", key, err)
+        return err
+    }
+
+    glog.Infof("Retrieved job: %s", key)
+    jobStatus := job.Status
+    if jobStatus.StartTime == nil {
+        jc.queue.AddAfter(jc.namespace + "/" + key, time.Duration(50000000000))
+    } else {
+        start, err := time.Parse("2006-01-02 15:04:05 +0800 CST", jobStatus.StartTime.String()) // returns UTC
+        if err != nil {
+            glog.Errorf("Failed to parse start time: %s for job: %s", jobStatus.StartTime.String(), key)
+            return err
+        }
+        if jobStatus.Active == 0 && sinceNow(start) > timelimit {
+            err := jc.client.BatchV1().Jobs(jc.namespace).Delete(key, &meta_v1.DeleteOptions{})
+            // if delete fails, add job back to the queue
+            if err != nil {
+                jc.queue.Add(jc.namespace + "/" + key)
+                glog.Errorf("Failed to delete job: %s, add back to the queue", key, timelimit)
+                return err
+            }
+            glog.Infof("Deleted job: %s", key)
+        }
+    }
+    return nil
+}
+
+func getNamespace() string {
+    namespace := os.Getenv("POD_NAMESPACE")
+    if len(namespace) == 0 {
+        data, err := ioutil.ReadFile(defaultNamespaceFile)
+        if err != nil {
+            glog.Warningf("Failed to load namespace from: %s, use default namespace instead", defaultNamespaceFile)
+            namespace = defaultNamespaceName
+        } else {
+            namespace = strings.TrimSpace(string(data))
+        }
+        glog.Infof("Set namespace to: %s", namespace)
+    }
+    return namespace
+}
+
+func sinceNow(startTime time.Time) float64 {
+    now, err := time.Parse("2006-01-02 15:04:05", time.Now().Format("2006-01-02 15:04:05"))
+    if err != nil {
+        glog.Errorf("Failed to parse current timestamp in format '%s'", "2006-01-02 15:04:05")
+        return 0.0
+    }
+    fmt.Println(now.Sub(startTime).Hours())
+    return now.Sub(startTime).Hours()
+}
