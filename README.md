@@ -9,4 +9,5 @@ Job is a resource in Kubernetes which is normally used for one-time task. After 
 To run the job cleaner locally, export `KUBECONFIG` to the location of k8s config on your local laptop. For example, `export KUBECONFIG=~/.kube/config`. Next step, execute `go build caksu/main.go`. Last, run `caksu/main`. 
 
 ### Cluster
+To run the job cleaner in a cluster, create a deployment following `job-clean-controller.yaml` in the `example` folder.
 

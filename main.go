@@ -22,7 +22,7 @@ import (
 
 
 const (
-    defaultTimeLimit string     = "-1"
+    defaultTimeLimit string     = "24"
     defaultNamespaceFile string = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
     defaultNamespaceName string = "default"
 )
@@ -136,7 +136,7 @@ func (jc *JobCleanController) process(key string) error {
     }
     timelimit, err := strconv.ParseFloat(timelimitStr, 64)
     if err != nil {
-        glog.Errorf("Failed to convert time limit: '%s' to integer", timelimitStr)
+        glog.Errorf("Failed to convert time limit: '%s' to float", timelimitStr)
         return err
     }
 
