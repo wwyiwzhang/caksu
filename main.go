@@ -148,27 +148,25 @@ func (jc *JobCleanController) process(key string) error {
 
     glog.Infof("Retrieved job: %s", key)
     jobStatus := job.Status
-    if jobStatus.StartTime == nil {
-        jc.queue.AddAfter(jc.namespace + "/" + key, time.Duration(50000000000))
-    } else {
+    if jobStatus.StartTime != nil {
         start, err := parseTime(jobStatus.StartTime.String())
         if err != nil {
-            glog.Errorf("Failed to parse start time: %s for job: %s", jobStatus.StartTime.String(), key)
+            glog.Errorf("Failed to parse start time: %s for job: %s, add back to the queue", jobStatus.StartTime.String(), key)
+            jc.queue.AddAfter(jc.namespace + "/" + key, time.Duration(50000000000))
             return err
-        }
+        } 
         if jobStatus.Active == 0 && sinceNow(start) > timelimit {
             err := jc.client.BatchV1().Jobs(jc.namespace).Delete(key, &meta_v1.DeleteOptions{})
-            // if delete fails, add job back to the queue
-            if err != nil {
-                jc.queue.AddAfter(jc.namespace + "/" + key, time.Duration(50000000000))
+            if err == nil {
+                glog.Infof("Deleted job: %s", key)
+            } else {
                 glog.Errorf("Failed to delete job: %s, add back to the queue", key, timelimit)
-                return err
+                jc.queue.AddAfter(jc.namespace + "/" + key, time.Duration(50000000000))
             }
-            glog.Infof("Deleted job: %s", key)
-        } else {
-            jc.queue.AddAfter(jc.namespace + "/" + key, time.Duration(50000000000))
+            return err
         }
-    }
+    } 
+    jc.queue.AddAfter(jc.namespace + "/" + key, time.Duration(50000000000))
     return nil
 }
 

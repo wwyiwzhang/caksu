@@ -9,3 +9,4 @@ To run the job cleaner locally, export `KUBECONFIG` to the location of k8s confi
 ### Cluster
 To run the job cleaner in a cluster, create a deployment following `job-clean-controller.yaml` in the `example` folder.
 ## References
+Aaron Levy's presentation from KubeCon 2017. Highly recommend to check it out!
