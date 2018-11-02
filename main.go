@@ -151,7 +151,7 @@ func (jc *JobCleanController) process(key string) error {
     if jobStatus.StartTime == nil {
         jc.queue.AddAfter(jc.namespace + "/" + key, time.Duration(50000000000))
     } else {
-        start, err := time.Parse("2006-01-02 15:04:05 +0800 CST", jobStatus.StartTime.String()) // returns UTC
+        start, err := parseTime(jobStatus.StartTime.String())
         if err != nil {
             glog.Errorf("Failed to parse start time: %s for job: %s", jobStatus.StartTime.String(), key)
             return err
@@ -160,11 +160,13 @@ func (jc *JobCleanController) process(key string) error {
             err := jc.client.BatchV1().Jobs(jc.namespace).Delete(key, &meta_v1.DeleteOptions{})
             // if delete fails, add job back to the queue
             if err != nil {
-                jc.queue.Add(jc.namespace + "/" + key)
+                jc.queue.AddAfter(jc.namespace + "/" + key, time.Duration(50000000000))
                 glog.Errorf("Failed to delete job: %s, add back to the queue", key, timelimit)
                 return err
             }
             glog.Infof("Deleted job: %s", key)
+        } else {
+            jc.queue.AddAfter(jc.namespace + "/" + key, time.Duration(50000000000))
         }
     }
     return nil
@@ -192,4 +194,19 @@ func sinceNow(startTime time.Time) float64 {
         return 0.0
     }
     return now.Sub(startTime).Hours()
+}
+
+func parseTime(timeStr string) (time.Time, error) {
+    var format string
+
+    switch {
+        case strings.Contains(timeStr, "CST"):
+            format = "2006-01-02 15:04:05 +0800 CST"
+        case strings.Contains(timeStr, "UTC"):
+            format = "2006-01-02 15:04:05 +0000 UTC"
+        default:
+            format = "2006-01-02T15:04:05Z07:00"
+    }
+    parsed, err := time.Parse(format, timeStr)
+    return parsed, err
 }
