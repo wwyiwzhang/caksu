@@ -1,19 +1,17 @@
-FROM golang:latest
+FROM golang:1.10.4
 LABEL maintainer="vvianzhang@gmail.com"
 
-RUN apt-get update -y && \
+RUN apt-get update && \
     apt-get install -y dnsutils && \
     rm -rf /var/lib/apt/lists/*
 
-ADD . $GOPATH/src/github.com/job-cleaner
+ADD . $GOPATH/src/github.com/caksu
 
-WORKDIR $GOPATH/src/github.com/job-cleaner
+WORKDIR $GOPATH/src/github.com/caksu
 
-RUN go get github.com/golang/glog && \
-    go get k8s.io/api && \
-    go get k8s.io/apimachinery \
-    go get k8s.io/client-go
+RUN cp -r vendor/k8s.io $GOPATH/src && \
+    cp -r vendor/github.com $GOPATH/src
 
 RUN go build .
 
-ENTRYPOINT ["./job-cleaner"]
+ENTRYPOINT ["./caksu"]

@@ -1,16 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: job-cleaner-controller
+  name: job-clean-controller
   labels:
-    app: job-cleaner
+    app: job-clean
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: job-clean
   template:
     metadata:
       labels:
-        app: job-cleaner
+        app: job-clean
     spec:
       containers:
-      - name: job-cleaner
-        image: wwyizhang/job-cleaner:latest
+      - name: job-clean
+        image: wwyizhang/caksu:latest
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+

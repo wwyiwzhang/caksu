@@ -1,7 +1,7 @@
 # CAKSU
 
 ## Job Clean Controller
-Job is a resource in Kubernetes which is normally used for one-time task. After job is created, it will spin up a pod to execute the task. However, if we don't clean up the failed jobs in time, they will pile up and makes clean-up a bit difficult. It's generally recommended to delete the failed jobs after certain time. Here we set the time limit to 24 hours and it's currently hard-coded which will be changed in the future. 
+Job is a resource in Kubernetes which is normally used for one-time task. After job is created, it will spin up a pod to execute the task. However, if we don't clean up the failed jobs in time, they will pile up and makes clean-up a bit difficult later. It's generally recommended to delete the failed jobs after certain time. Here we set the time limit to 24 hours and it's currently hard-coded which will be changed in the future.
 
 ## Install and Run 
 
@@ -11,3 +11,5 @@ To run the job cleaner locally, export `KUBECONFIG` to the location of k8s confi
 ### Cluster
 To run the job cleaner in a cluster, create a deployment following `job-clean-controller.yaml` in the `example` folder.
 
+## References
+ 
