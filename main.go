@@ -30,10 +30,11 @@ const (
 
 type JobCleanController struct {
     client      kubernetes.Interface
+    deleteJob   func(namespace string, key string) error
     jobLister   lister_v1.JobLister
     informer    cache.Controller
-    queue       workqueue.RateLimitingInterface
     namespace   string
+    queue       workqueue.RateLimitingInterface
 }
 
 func main() {
@@ -65,6 +66,9 @@ func newJobCleanController(client kubernetes.Interface) *JobCleanController {
         client: client,
         queue: workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
         namespace: getNamespace(),
+        deleteJob: func(namespace string, key string) error {
+            return client.BatchV1().Jobs(namespace).Delete(key, &meta_v1.DeleteOptions{})
+        },
     }
 
     //TODO: resource version
@@ -156,11 +160,11 @@ func (jc *JobCleanController) process(key string) error {
             return err
         } 
         if jobStatus.Active == 0 && sinceNow(start) > timelimit {
-            err := jc.client.BatchV1().Jobs(jc.namespace).Delete(key, &meta_v1.DeleteOptions{})
+            err := jc.deleteJob(jc.namespace, key)
             if err == nil {
                 glog.Infof("Deleted job: %s", key)
             } else {
-                glog.Errorf("Failed to delete job: %s, add back to the queue", key, timelimit)
+                glog.Errorf("Failed to delete job: %s, add back to the queue", key)
                 jc.queue.AddAfter(jc.namespace + "/" + key, time.Duration(50000000000))
             }
             return err
