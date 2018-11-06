@@ -102,7 +102,7 @@ func newJobCleanController(client kubernetes.Interface) *JobCleanController {
 func (jc *JobCleanController) Run(stopChan chan struct{}) {
     defer jc.queue.ShutDown()
 
-    glog.Info("Start Job Clean Controller")
+    glog.Info("Starting Job Clean Controller")
     go jc.informer.Run(stopChan)
 
     for {
