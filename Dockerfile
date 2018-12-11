@@ -9,9 +9,6 @@ ADD . $GOPATH/src/github.com/caksu
 
 WORKDIR $GOPATH/src/github.com/caksu
 
-RUN cp -r vendor/k8s.io $GOPATH/src && \
-    cp -r vendor/github.com $GOPATH/src
-
 RUN go build .
 
-ENTRYPOINT ["./caksu"]
+CMD ["./caksu"]
