@@ -25,6 +25,3 @@ docker-build:
 docker-push:
 	@echo "pushing docker image:" ${IMG} "to Dockerhub"
 	docker push ${IMG}
-
-
-

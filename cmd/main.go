@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	defaultTimeLimit     float64 = 24.0
-	defaultNamespaceFile string  = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
-	defaultNamespaceName string  = "default"
+	defaultProcessingDelay = time.Duration(50000000000)
+	defaultTimeLimit       = 24.0
+	defaultNamespaceFile   = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+	defaultNamespaceName   = "default"
 )
 
 type JobCleanController struct {
@@ -138,7 +139,7 @@ func (jc *JobCleanController) process(key string) error {
 	glog.Infof("retrieved job: %s", key)
 	jobStatus := job.Status
 	if jobStatus.StartTime == nil {
-		jc.queue.AddAfter(key, time.Duration(50000000000))
+		jc.queue.AddAfter(key, defaultProcessingDelay)
 		return nil
 	}
 	start, err := parseTime(jobStatus.StartTime.String())
@@ -149,20 +150,20 @@ func (jc *JobCleanController) process(key string) error {
 			key,
 			err,
 		)
-		jc.queue.AddAfter(key, time.Duration(50000000000))
+		jc.queue.AddAfter(key, defaultProcessingDelay)
 		return err
 	}
 	if jobStatus.Active == 0 && jc.passedTimeLimit(start) {
 		err := jc.deleteJob(jc.namespace, key)
 		if err != nil {
 			glog.Errorf("failed to delete job: %s, add back to the queue, %v", key, err)
-			jc.queue.AddAfter(key, time.Duration(50000000000))
+			jc.queue.AddAfter(key, defaultProcessingDelay)
 			return err
 		}
 		glog.Infof("deleted job: %s in namespace: %s", key, jc.namespace)
 		return nil
 	}
-	jc.queue.AddAfter(key, time.Duration(50000000000))
+	jc.queue.AddAfter(key, defaultProcessingDelay)
 	return nil
 }
 
