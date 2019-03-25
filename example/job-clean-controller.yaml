@@ -14,11 +14,15 @@ spec:
       labels:
         app: job-clean
     spec:
+      serviceAccount: job-cleaner
       containers:
       - name: job-clean
         image: wwyizhang/caksu:latest
         env:
+        - name: JOB_TIME_LIMIT_IN_HOURS
+          value: "0.02"
         - name: POD_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+          

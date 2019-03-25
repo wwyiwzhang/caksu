@@ -20,18 +20,19 @@ import (
 )
 
 const (
-	defaultTimeLimit     string = "24"
-	defaultNamespaceFile string = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
-	defaultNamespaceName string = "default"
+	defaultTimeLimit     float64 = 24.0
+	defaultNamespaceFile string  = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+	defaultNamespaceName string  = "default"
 )
 
 type JobCleanController struct {
-	client    kubernetes.Interface
-	deleteJob func(namespace string, key string) error
-	jobLister lister_v1.JobLister
-	informer  cache.Controller
-	namespace string
-	queue     workqueue.RateLimitingInterface
+	client          kubernetes.Interface
+	deleteJob       func(namespace string, key string) error
+	jobLister       lister_v1.JobLister
+	informer        cache.Controller
+	namespace       string
+	passedTimeLimit func(t time.Time) bool
+	queue           workqueue.RateLimitingInterface
 }
 
 func main() {
@@ -59,12 +60,17 @@ func main() {
 }
 
 func newJobCleanController(client kubernetes.Interface) *JobCleanController {
+
+	timeLimit := getTimeLimit()
 	jc := &JobCleanController{
 		client:    client,
 		queue:     workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
 		namespace: getNamespace(),
 		deleteJob: func(namespace string, key string) error {
 			return client.BatchV1().Jobs(namespace).Delete(key, &meta_v1.DeleteOptions{})
+		},
+		passedTimeLimit: func(t time.Time) bool {
+			return time.Since(t).Hours() > timeLimit
 		},
 	}
 
@@ -82,9 +88,8 @@ func newJobCleanController(client kubernetes.Interface) *JobCleanController {
 		10*time.Second,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				if key, err := cache.MetaNamespaceKeyFunc(obj); err == nil {
-					jc.queue.Add(key)
-				}
+				job := obj.(*v1.Job)
+				jc.queue.Add(job.GetName())
 			},
 		},
 		cache.Indexers{},
@@ -105,9 +110,6 @@ func (jc *JobCleanController) Run(stopChan chan struct{}) {
 	for {
 		jc.processNext()
 	}
-
-	<-stopChan
-	glog.Info("shut down Job Clean Controller")
 }
 
 func (jc *JobCleanController) processNext() bool {
@@ -116,12 +118,10 @@ func (jc *JobCleanController) processNext() bool {
 		return false
 	}
 	defer jc.queue.Done(key)
-
-	jobName := strings.Split(key.(string), "/")[1]
-	err := jc.process(jobName)
-
+	err := jc.process(key.(string))
 	if err != nil {
-		glog.Warningf("skipped job: %s", jobName)
+		glog.Warningf("skipped job: %s, %v", key, err)
+		return false
 	}
 	return true
 }
@@ -129,17 +129,6 @@ func (jc *JobCleanController) processNext() bool {
 func (jc *JobCleanController) process(key string) error {
 	// determine the job duration between now and start time
 	// if the job duration > time limit and has no active pods then delete the job
-
-	timelimitStr := os.Getenv("JOB_TIME_LIMIT_IN_HOURS")
-	if len(timelimitStr) == 0 {
-		timelimitStr = defaultTimeLimit
-	}
-	timelimit, err := strconv.ParseFloat(timelimitStr, 64)
-	if err != nil {
-		glog.Errorf("failed to convert time limit: '%s' to float64", timelimitStr)
-		return err
-	}
-
 	job, err := jc.jobLister.Jobs(jc.namespace).Get(key)
 	if err != nil {
 		glog.Errorf("failed to retrieve job: %s, %v", key, err)
@@ -148,27 +137,32 @@ func (jc *JobCleanController) process(key string) error {
 
 	glog.Infof("retrieved job: %s", key)
 	jobStatus := job.Status
-	namespacedKey := strings.Join([]string{jc.namespace, key}, "/")
 	if jobStatus.StartTime == nil {
-		// job has no start time
+		jc.queue.AddAfter(key, time.Duration(50000000000))
 		return nil
 	}
 	start, err := parseTime(jobStatus.StartTime.String())
 	if err != nil {
-		glog.Errorf("failed to parse start time: %s for job: %s, add back to the queue, %v",
-			jobStatus.StartTime.String(), key, err)
-		jc.queue.AddAfter(namespacedKey, time.Duration(50000000000))
+		glog.Errorf(
+			"failed to parse start time: %s for job: %s, add back to the queue, %v",
+			jobStatus.StartTime.String(),
+			key,
+			err,
+		)
+		jc.queue.AddAfter(key, time.Duration(50000000000))
 		return err
 	}
-	if jobStatus.Active == 0 && sinceNow(start) > timelimit {
+	if jobStatus.Active == 0 && jc.passedTimeLimit(start) {
 		err := jc.deleteJob(jc.namespace, key)
 		if err != nil {
-			glog.Errorf("failed to delete job: %s, add back to the queue", key)
-			jc.queue.AddAfter(namespacedKey, time.Duration(50000000000))
+			glog.Errorf("failed to delete job: %s, add back to the queue, %v", key, err)
+			jc.queue.AddAfter(key, time.Duration(50000000000))
 			return err
 		}
 		glog.Infof("deleted job: %s in namespace: %s", key, jc.namespace)
+		return nil
 	}
+	jc.queue.AddAfter(key, time.Duration(50000000000))
 	return nil
 }
 
@@ -177,8 +171,11 @@ func getNamespace() string {
 	if len(namespace) == 0 {
 		data, err := ioutil.ReadFile(defaultNamespaceFile)
 		if err != nil {
-			glog.Warningf("failed to load namespace from: %s, use default namespace instead, %v",
-				defaultNamespaceFile, err)
+			glog.Warningf(
+				"failed to load namespace from: %s, use default namespace instead, %v",
+				defaultNamespaceFile,
+				err,
+			)
 			namespace = defaultNamespaceName
 		} else {
 			namespace = strings.TrimSpace(string(data))
@@ -187,14 +184,21 @@ func getNamespace() string {
 	return namespace
 }
 
-func sinceNow(startTime time.Time) float64 {
-	now, err := time.Parse("2006-01-02 15:04:05", time.Now().Format("2006-01-02 15:04:05"))
-	if err != nil {
-		glog.Errorf("failed to parse current timestamp in format '%s', %v",
-			"2006-01-02 15:04:05", err)
-		return 0.0
+func getTimeLimit() float64 {
+	timelimitStr := os.Getenv("JOB_TIME_LIMIT_IN_HOURS")
+	if len(timelimitStr) == 0 {
+		return defaultTimeLimit
 	}
-	return now.Sub(startTime).Hours()
+	timelimit, err := strconv.ParseFloat(timelimitStr, 64)
+	if err != nil {
+		glog.Errorf(
+			"failed to convert time limit: '%s' to float64, use default time limit instead",
+			timelimitStr,
+		)
+		return defaultTimeLimit
+	}
+	glog.Infof("time limit to delete failed job is set at: %f (hours)", timelimit)
+	return timelimit
 }
 
 func parseTime(timeStr string) (time.Time, error) {
@@ -205,6 +209,8 @@ func parseTime(timeStr string) (time.Time, error) {
 		format = "2006-01-02 15:04:05 +0800 CST"
 	case strings.Contains(timeStr, "UTC"):
 		format = "2006-01-02 15:04:05 +0000 UTC"
+	case strings.Contains(timeStr, "PDT"):
+		format = "2006-01-02 15:04:05 -0700 PDT"
 	default:
 		format = "2006-01-02T15:04:05Z07:00"
 	}

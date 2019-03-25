@@ -1,13 +1,13 @@
 apiVersion: batch/v1
 kind: Job
 metadata: 
-  name: test-job2
+  name: test-job3
 spec:
   template:
     spec:
       containers:
       - name: run-busybox
         image: library/busybox:latest
-        command: ["/bin/bash", "-c", "sleep 3600"]
+        command: ["/bin/bash", "-c", "whatup"]
       restartPolicy: Never
   backoffLimit: 3

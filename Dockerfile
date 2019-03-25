@@ -9,6 +9,6 @@ ADD . $GOPATH/src/github.com/caksu
 
 WORKDIR $GOPATH/src/github.com/caksu
 
-RUN go build .
+RUN go build -o caksu ./cmd/...
 
 CMD ["./caksu"]
