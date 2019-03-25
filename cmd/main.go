@@ -198,7 +198,7 @@ func getTimeLimit() float64 {
 		)
 		return defaultTimeLimit
 	}
-	glog.Infof("time limit to delete failed job is set at: %f (hours)", timelimit)
+	glog.Infof("time limit to delete failed jobs: %f (hours)", timelimit)
 	return timelimit
 }
 
