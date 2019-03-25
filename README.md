@@ -7,6 +7,10 @@ It's generally recommended to delete the failed jobs after certain time. Here we
 ### Local
 To run the job cleaner locally, export `KUBECONFIG` to the location of k8s config on your local laptop. For example, `export KUBECONFIG=~/.kube/config`. Next step, execute `go build caksu/main.go`. Last, run `caksu/main`. 
 ### Cluster
-To run the job cleaner in a cluster, create a deployment following `job-clean-controller.yaml` in the `example` folder.
+To run the job cleaner in a cluster, first config RBAC by running this command, 
+```bash
+make install
+```
+then create a deployment following `job-clean-controller.yaml` in the `example` folder.
 ## References
 Aaron Levy's presentation from KubeCon 2017. Highly recommend to check it out!
