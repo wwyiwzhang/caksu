@@ -1,0 +1,30 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: job-cleaner
+  namespace: default
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: job-cleaner-role
+  namespace: default
+rules:
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "watch", "list", "delete"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: job-cleaner-role
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: job-cleaner
+  namespace: default
+roleRef:
+  kind: Role 
+  name: job-cleaner-role
+  apiGroup: rbac.authorization.k8s.io

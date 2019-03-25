@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: job-clean-controller
+  labels:
+    app: job-clean
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: job-clean
+  template:
+    metadata:
+      labels:
+        app: job-clean
+    spec:
+      serviceAccount: job-cleaner
+      containers:
+      - name: job-clean
+        image: wwyizhang/caksu:latest
+        env:
+        - name: JOB_TIME_LIMIT_IN_HOURS
+          value: "0.02"
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
