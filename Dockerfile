@@ -1,14 +1,10 @@
-FROM golang:1.10.4
+FROM golang:1.10.4 as builder
+COPY . /go/src/caksu
+WORKDIR /go/src/caksu
+RUN CGO_ENABLED=0 GOOS=linux go build -o caksu ./cmd/...
+
+FROM alpine:latest
 LABEL maintainer="vvianzhang@gmail.com"
-
-RUN apt-get update && \
-    apt-get install -y dnsutils && \
-    rm -rf /var/lib/apt/lists/*
-
-ADD . $GOPATH/src/github.com/caksu
-
-WORKDIR $GOPATH/src/github.com/caksu
-
-RUN go build -o caksu ./cmd/...
-
+WORKDIR /root/
+COPY --from=builder /go/src/caksu/caksu .
 CMD ["./caksu"]
