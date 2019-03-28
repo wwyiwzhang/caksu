@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang/glog"
+	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/batch/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,6 +36,8 @@ type JobCleanController struct {
 	queue           workqueue.RateLimitingInterface
 }
 
+var log *logrus.Logger
+
 func main() {
 
 	// load kubeconfig
@@ -44,14 +46,14 @@ func main() {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 
 	if err != nil {
-		glog.Fatalf("failed to load kubeconfig, %v", err)
+		log.Fatalf("failed to load kubeconfig, %v", err)
 	}
 
 	// create k8s client
 	client, err := kubernetes.NewForConfig(config)
 
 	if err != nil {
-		glog.Fatalf("failed to create kubernetes client, %v", err)
+		log.Fatalf("failed to create kubernetes client, %v", err)
 	}
 
 	stopChan := make(chan struct{})
@@ -105,7 +107,7 @@ func newJobCleanController(client kubernetes.Interface) *JobCleanController {
 func (jc *JobCleanController) Run(stopChan chan struct{}) {
 	defer jc.queue.ShutDown()
 
-	glog.Info("starting Job Clean Controller")
+	log.Info("starting Job Clean Controller")
 	go jc.informer.Run(stopChan)
 
 	for {
@@ -121,7 +123,7 @@ func (jc *JobCleanController) processNext() bool {
 	defer jc.queue.Done(key)
 	err := jc.process(key.(string))
 	if err != nil {
-		glog.Warningf("skipped job: %s, %v", key, err)
+		log.Warningf("skipped job: %s, %v", key, err)
 		return false
 	}
 	return true
@@ -132,11 +134,11 @@ func (jc *JobCleanController) process(key string) error {
 	// if the job duration > time limit and has no active pods then delete the job
 	job, err := jc.jobLister.Jobs(jc.namespace).Get(key)
 	if err != nil {
-		glog.Errorf("failed to retrieve job: %s, %v", key, err)
+		log.Errorf("failed to retrieve job: %s, %v", key, err)
 		return err
 	}
 
-	glog.Infof("retrieved job: %s", key)
+	log.Infof("retrieved job: %s", key)
 	jobStatus := job.Status
 	if jobStatus.StartTime == nil {
 		jc.queue.AddAfter(key, defaultProcessingDelay)
@@ -144,7 +146,7 @@ func (jc *JobCleanController) process(key string) error {
 	}
 	start, err := parseTime(jobStatus.StartTime.String())
 	if err != nil {
-		glog.Errorf(
+		log.Errorf(
 			"failed to parse start time: %s for job: %s, add back to the queue, %v",
 			jobStatus.StartTime.String(),
 			key,
@@ -156,11 +158,11 @@ func (jc *JobCleanController) process(key string) error {
 	if jobStatus.Active == 0 && jc.passedTimeLimit(start) {
 		err := jc.deleteJob(jc.namespace, key)
 		if err != nil {
-			glog.Errorf("failed to delete job: %s, add back to the queue, %v", key, err)
+			log.Errorf("failed to delete job: %s, add back to the queue, %v", key, err)
 			jc.queue.AddAfter(key, defaultProcessingDelay)
 			return err
 		}
-		glog.Infof("deleted job: %s in namespace: %s", key, jc.namespace)
+		log.Infof("deleted job: %s in namespace: %s", key, jc.namespace)
 		return nil
 	}
 	jc.queue.AddAfter(key, defaultProcessingDelay)
@@ -172,7 +174,7 @@ func getNamespace() string {
 	if len(namespace) == 0 {
 		data, err := ioutil.ReadFile(defaultNamespaceFile)
 		if err != nil {
-			glog.Warningf(
+			log.Warningf(
 				"failed to load namespace from: %s, use default namespace instead, %v",
 				defaultNamespaceFile,
 				err,
@@ -192,13 +194,13 @@ func getTimeLimit() float64 {
 	}
 	timelimit, err := strconv.ParseFloat(timelimitStr, 64)
 	if err != nil {
-		glog.Errorf(
+		log.Errorf(
 			"failed to convert time limit: '%s' to float64, use default time limit instead",
 			timelimitStr,
 		)
 		return defaultTimeLimit
 	}
-	glog.Infof("time limit to delete failed jobs: %f (hours)", timelimit)
+	log.Infof("time limit to delete failed jobs: %f (hours)", timelimit)
 	return timelimit
 }
 
@@ -217,4 +219,9 @@ func parseTime(timeStr string) (time.Time, error) {
 	}
 	parsed, err := time.Parse(format, timeStr)
 	return parsed, err
+}
+
+func init() {
+	log = logrus.New()
+	log.SetReportCaller(true)
 }
